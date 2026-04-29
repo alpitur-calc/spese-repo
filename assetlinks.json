@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "io.github.alpitur_calc.twa",
+        "sha256_cert_fingerprints": ["5F:11:DD:8C:B1:A1:22:D0:02:C8:BB:95:76:38:7F:5A:56:D3:22:20:EE:0C:C2:8F:D0:D4:7D:94:A3:E0:AE:6F"]
+      }
+    }]
