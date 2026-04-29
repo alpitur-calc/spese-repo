@@ -1,5 +1,15 @@
-const CACHE = 'spese-v27';
-const ASSETS = ['./', 'index.html', 'styles.css?v=26', 'app.js?v=26', 'manifest.webmanifest', 'icon.svg'];
+const CACHE = 'spese-v28';
+const ASSETS = [
+  './',
+  'index.html',
+  'styles.css?v=26',
+  'app.js?v=26',
+  'manifest.webmanifest',
+  'icon.svg',
+  'icon-192.png',
+  'icon-512.png',
+  'icon-512-maskable.png',
+];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
