@@ -2,7 +2,7 @@
       "relation": ["delegate_permission/common.handle_all_urls"],
       "target": {
         "namespace": "android_app",
-        "package_name": "io.github.alpitur_calc.twa",
-        "sha256_cert_fingerprints": ["5F:11:DD:8C:B1:A1:22:D0:02:C8:BB:95:76:38:7F:5A:56:D3:22:20:EE:0C:C2:8F:D0:D4:7D:94:A3:E0:AE:6F"]
+        "package_name": "com.alpiturcalc.spese",
+        "sha256_cert_fingerprints": ["CA:45:BD:7F:43:68:AC:57:A6:66:B1:71:37:8C:61:D2:E5:CC:96:3E:9B:6F:82:2A:E4:48:14:D1:77:75:7E:96"]
       }
     }]
