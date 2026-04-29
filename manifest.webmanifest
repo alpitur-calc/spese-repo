@@ -1,0 +1,20 @@
+{
+  "name": "Spese",
+  "short_name": "Spese",
+  "description": "Traccia entrate e uscite mensili",
+  "lang": "it",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#2d2d2d",
+  "theme_color": "#2d2d2d",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
