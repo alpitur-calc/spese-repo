@@ -3,6 +3,6 @@
       "target": {
         "namespace": "android_app",
         "package_name": "com.alpiturcalc.spese",
-        "sha256_cert_fingerprints": ["CA:45:BD:7F:43:68:AC:57:A6:66:B1:71:37:8C:61:D2:E5:CC:96:3E:9B:6F:82:2A:E4:48:14:D1:77:75:7E:96"]
+        "sha256_cert_fingerprints": ["A9:58:D1:0B:20:AC:12:75:E7:02:57:01:95:01:B9:3A:49:5C:04:01:50:9D:A7:05:88:CA:19:09:D8:04:36:EC"]
       }
     }]
