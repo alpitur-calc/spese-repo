@@ -41,6 +41,25 @@ const COLORS = [
   '#ec4899', '#f43f5e', '#fb923c', '#4ade80', '#38bdf8',
 ];
 
+// ---------- Constants ----------
+const PIE = {
+  size: 280,
+  radius: 80,
+  strokeWidth: 28,
+  iconSize: 20,
+  iconMinFrac: 0.05,    // soglia minima della fetta per disegnare l'icona
+  connectorLen: 14,     // lunghezza della lineetta arco→icona
+};
+const SWIPE = {
+  minDistance: 60,      // px orizzontali minimi per attivare lo swipe
+  horizontalRatio: 1.5, // |dx| deve essere >= ratio * |dy|
+};
+const BACKUP_BANNER = {
+  warningDays: 7,       // mostra banner se ultimo backup ≥ N giorni fa
+  dangerDays: 30,       // banner rosso se ultimo backup ≥ N giorni fa
+};
+const SW_UPDATE_INTERVAL_MS = 60 * 60 * 1000; // 1h
+
 // ---------- Data ----------
 const STORAGE_KEY = 'spese_data_v1';
 
@@ -110,6 +129,9 @@ try {
 } catch { data = defaultData(); }
 
 function save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+
+// persist any migration changes immediately so they survive a reload
+save();
 
 // ---------- State ----------
 const state = {
@@ -324,24 +346,14 @@ function parseCsv(text) {
 
 function importCsvBackup(files) {
   const list = Array.from(files || []);
-  console.group('[import] Avvio ripristino backup');
-  console.log('[import] file ricevuti:', list.length,
-    list.map(f => ({ name: f.name, size: f.size, type: f.type })));
-  if (list.length === 0) { console.warn('[import] nessun file'); console.groupEnd(); return; }
+  if (list.length === 0) return;
   const parsed = [];
   let done = 0;
   for (const f of list) {
     const reader = new FileReader();
     reader.onload = () => {
-      const raw = reader.result;
-      console.log(`[import] letto "${f.name}" (${raw.length} char). Primi 200:`,
-        raw.slice(0, 200));
       try {
-        const rows = parseCsv(raw);
-        console.log(`[import] "${f.name}" → ${rows.length} righe parsate (inclusa intestazione)`);
-        if (rows.length > 0) console.log(`[import] header:`, rows[0]);
-        if (rows.length > 1) console.log(`[import] prima riga dati:`, rows[1]);
-        parsed.push({ name: f.name, rows });
+        parsed.push({ name: f.name, rows: parseCsv(reader.result) });
       } catch (err) {
         console.error(`[import] errore parsing "${f.name}":`, err);
         parsed.push({ name: f.name, error: String(err) });
@@ -361,32 +373,25 @@ function importCsvBackup(files) {
 }
 
 function finishCsvImport(parsed) {
-  console.log('[import] finishCsvImport, file parsati:', parsed.length);
   let newCats = null, newEntries = null;
   let invalidRows = 0;
   const errors = [];
   for (const p of parsed) {
-    console.group(`[import] analisi file "${p.name}"`);
     if (p.error) {
-      console.error('[import] errore:', p.error);
       errors.push(`${p.name}: ${p.error}`);
-      console.groupEnd(); continue;
+      continue;
     }
     const rows = p.rows;
     if (!rows || rows.length === 0) {
-      console.warn('[import] file vuoto');
       errors.push(`${p.name}: vuoto`);
-      console.groupEnd(); continue;
+      continue;
     }
     const headers = rows[0].map(s => s.toLowerCase().trim());
     const idx = (k) => headers.indexOf(k);
     const body = rows.slice(1);
-    console.log('[import] header normalizzati:', headers);
-    console.log('[import] righe dati:', body.length);
 
     const isCategories = idx('nome') >= 0 && idx('tipo') >= 0 && idx('importo') < 0;
     const isEntries = idx('data') >= 0 && idx('importo') >= 0;
-    console.log('[import] riconosciuto come:', isCategories ? 'CATEGORIE' : isEntries ? 'MOVIMENTI' : 'SCONOSCIUTO');
 
     if (isCategories) {
       newCats = body.map(r => ({
@@ -397,7 +402,6 @@ function finishCsvImport(parsed) {
         color: (r[idx('colore')] || '').trim() || '#8acca5',
         excluded: ['1','true','si','sì','yes'].includes((r[idx('escludi')] || '').trim().toLowerCase()),
       })).filter(c => c.name);
-      console.log(`[import] ${newCats.length} categorie estratte:`, newCats);
     } else if (isEntries) {
       const raw = body.map((r, i) => ({
         _row: i + 2,
@@ -414,24 +418,17 @@ function finishCsvImport(parsed) {
       const bad = raw.filter(e => !e.date || !isFinite(e.amount) || e.amount <= 0);
       invalidRows += bad.length;
       if (bad.length) {
-        console.warn(`[import] ${bad.length} righe scartate:`,
-          bad.map(b => ({ riga: b._row, rawDate: b.rawDate, rawAmount: b.rawAmount, amount: b.amount, dateNorm: b.date })));
         const sample = bad.slice(0, 3).map(b =>
           `riga ${b._row}: data="${b.rawDate}" importo="${b.rawAmount}"`).join(' | ');
         errors.push(`${p.name}: ${bad.length} righe scartate. Es.: ${sample}`);
       }
       newEntries = raw.filter(e => e.date && isFinite(e.amount) && e.amount > 0);
-      console.log(`[import] ${newEntries.length} movimenti validi (primi 3):`, newEntries.slice(0, 3));
     } else {
-      console.error('[import] header non riconosciuto:', headers);
       errors.push(`${p.name}: formato non riconosciuto. Header letto: [${headers.join(', ')}]`);
     }
-    console.groupEnd();
   }
 
   if (!newCats && !newEntries) {
-    console.warn('[import] nessun dato valido');
-    console.groupEnd();
     alert(errors.length ? ('Errori:\n' + errors.join('\n')) : 'Nessun file CSV valido trovato.');
     return;
   }
@@ -441,33 +438,19 @@ function finishCsvImport(parsed) {
   if (newEntries) summary += `• ${newEntries.length} movimenti (sostituiscono quelli attuali)\n`;
   if (errors.length) summary += '\nAvvisi:\n' + errors.join('\n') + '\n';
   summary += '\nContinuare?';
-  if (!confirm(summary)) {
-    console.log('[import] annullato dall\'utente');
-    console.groupEnd();
-    return;
-  }
-
-  console.log('[import] stato categorie PRIMA:', data.categories.length, data.categories);
-  console.log('[import] stato movimenti PRIMA:', data.entries.length);
+  if (!confirm(summary)) return;
 
   if (newCats) data.categories = newCats;
 
   let orphans = 0, resolvedByName = 0;
-  const orphanExamples = [];
   if (newEntries) {
     const cats = data.categories;
-    console.log('[import] risoluzione categoria_id su', cats.length, 'categorie disponibili');
     data.entries = newEntries.map(e => {
       let catId = e.categoryId;
       if (!cats.find(c => c.id === catId)) {
         const byName = cats.find(c => c.name === e._catName);
         if (byName) { catId = byName.id; resolvedByName++; }
-        else {
-          orphans++;
-          if (orphanExamples.length < 5) {
-            orphanExamples.push({ id_cercato: e.categoryId, nome_cercato: e._catName, data: e.date });
-          }
-        }
+        else orphans++;
       }
       return {
         id: e.id, date: e.date, categoryId: catId,
@@ -477,26 +460,19 @@ function finishCsvImport(parsed) {
     });
   }
 
-  console.log(`[import] risoluzione: ${resolvedByName} per nome, ${orphans} orfani`);
-  if (orphanExamples.length) console.warn('[import] esempi orfani:', orphanExamples);
-  console.log('[import] stato categorie DOPO:', data.categories.length);
-  console.log('[import] stato movimenti DOPO:', data.entries.length);
-
   save();
   state.period = 'all';
   state.expanded.clear();
   render();
-  console.log('[import] render completato, filtro impostato su "Tutto"');
-  console.groupEnd();
 
   let done = 'Import completato.';
   if (newCats) done += `\n• ${newCats.length} categorie`;
   if (newEntries) {
     done += `\n• ${newEntries.length} movimenti importati`;
     if (resolvedByName) done += `\n  - ${resolvedByName} abbinati per nome categoria`;
-    if (orphans) done += `\n  - ${orphans} con categoria_id non trovato (vedi console per dettagli)`;
+    if (orphans) done += `\n  - ${orphans} con categoria_id non trovato`;
   }
-  if (invalidRows) done += `\n• ${invalidRows} righe scartate per data/importo non validi (vedi console)`;
+  if (invalidRows) done += `\n• ${invalidRows} righe scartate per data/importo non validi`;
   done += '\n\nFiltro impostato su "Tutto".';
   alert(done);
 }
@@ -553,7 +529,6 @@ function render() {
   app.append(swipeContent);
   app.append(renderFabs());
   if (state.modal) app.append(renderModal());
-  save();
   updatePersistStatusUI();
 }
 
@@ -565,7 +540,7 @@ function navigateWithAnimation(dir) {
   if (!content) return;
   const cls = dir > 0 ? 'slide-in-from-right' : 'slide-in-from-left';
   content.classList.add(cls);
-  setTimeout(() => content.classList.remove(cls), 300);
+  content.addEventListener('animationend', () => content.classList.remove(cls), { once: true });
 }
 
 function renderPeriodBar() {
@@ -577,7 +552,7 @@ function renderPeriodBar() {
         onclick: () => { state.period = p; render(); }
       }, {day:'Giorno', month:'Mese', year:'Anno', all:'Tutto'}[p])
     ),
-    h('button', { class: 'icon-btn', title: 'Impostazioni',
+    h('button', { class: 'icon-btn', title: 'Impostazioni', 'aria-label': 'Impostazioni',
       onclick: openSettings, html: GEAR_ICON })
   );
 }
@@ -585,9 +560,9 @@ function renderPeriodBar() {
 function renderRangeNav() {
   return state.period !== 'all'
     ? h('div', { class: 'range-nav' },
-        h('button', { onclick: () => navigateWithAnimation(-1) }, '‹'),
+        h('button', { 'aria-label': 'Periodo precedente', onclick: () => navigateWithAnimation(-1) }, '‹'),
         h('div', { class: 'label' }, periodLabel()),
-        h('button', { onclick: () => navigateWithAnimation(1) }, '›'))
+        h('button', { 'aria-label': 'Periodo successivo', onclick: () => navigateWithAnimation(1) }, '›'))
     : h('div', { class: 'range-nav' },
         h('div', { class: 'label' }, 'Tutti i periodi'));
 }
@@ -596,8 +571,8 @@ function renderBackupBanner() {
   if (data.entries.length === 0) return null;
   const days = daysSinceBackup();
   const never = days === null;
-  if (!never && days < 7) return null;
-  const danger = never || days >= 30;
+  if (!never && days < BACKUP_BANNER.warningDays) return null;
+  const danger = never || days >= BACKUP_BANNER.dangerDays;
   const msg = never
     ? 'Nessun backup salvato. Tocca per scaricarne uno.'
     : `${backupStatusLabel()}. Consigliato un nuovo backup.`;
@@ -640,14 +615,12 @@ function renderPieChart() {
   slices.sort((a, b) => b.amount - a.amount);
   const total = slices.reduce((s, x) => s + x.amount, 0);
 
-  const size = 280, r = 80, sw = 28, cx = size / 2, cy = size / 2;
+  const size = PIE.size, r = PIE.radius, sw = PIE.strokeWidth;
+  const cx = size / 2, cy = size / 2;
   const circ = 2 * Math.PI * r;
-  const ICON_SIZE = 20;
-  const ICON_MIN_FRAC = 0.05;
-  const LINE_LEN = 14;
   const lineInner = r + sw / 2;
-  const lineOuter = lineInner + LINE_LEN;
-  const iconRadius = lineOuter + ICON_SIZE / 2;
+  const lineOuter = lineInner + PIE.connectorLen;
+  const iconRadius = lineOuter + PIE.iconSize / 2;
 
   let offset = 0;
   const circles = [];
@@ -664,7 +637,7 @@ function renderPieChart() {
        stroke-dasharray="${drawn} ${circ - drawn}"
        stroke-dashoffset="${-offset}"
        transform="rotate(-90 ${cx} ${cy})"/>`);
-    if (frac >= ICON_MIN_FRAC) {
+    if (frac >= PIE.iconMinFrac) {
       const midAngle = ((offset + len / 2) / circ) * 2 * Math.PI - Math.PI / 2;
       const cosA = Math.cos(midAngle);
       const sinA = Math.sin(midAngle);
@@ -676,7 +649,7 @@ function renderPieChart() {
       const iy = cy + iconRadius * sinA;
       connectors.push(`<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="${s.cat.color}" stroke-width="1.5" stroke-linecap="round"/>`);
       const iconPath = ICONS[s.cat.icon] || ICONS.tag;
-      icons.push(`<svg x="${(ix - ICON_SIZE / 2).toFixed(2)}" y="${(iy - ICON_SIZE / 2).toFixed(2)}" width="${ICON_SIZE}" height="${ICON_SIZE}" viewBox="0 0 24 24" fill="none" stroke="${s.cat.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconPath}</svg>`);
+      icons.push(`<svg x="${(ix - PIE.iconSize / 2).toFixed(2)}" y="${(iy - PIE.iconSize / 2).toFixed(2)}" width="${PIE.iconSize}" height="${PIE.iconSize}" viewBox="0 0 24 24" fill="none" stroke="${s.cat.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${iconPath}</svg>`);
     }
     offset += len;
   }
@@ -844,9 +817,9 @@ function renderCategoryEntries(cat, entries) {
 
 function renderFabs() {
   return h('div', { class: 'fab-dock' },
-    h('button', { class: 'fab expense', title: 'Nuova uscita',
+    h('button', { class: 'fab expense', title: 'Nuova uscita', 'aria-label': 'Nuova uscita',
       onclick: () => openEntryModal(null, 'expense') }, '−'),
-    h('button', { class: 'fab income', title: 'Nuova entrata',
+    h('button', { class: 'fab income', title: 'Nuova entrata', 'aria-label': 'Nuova entrata',
       onclick: () => openEntryModal(null, 'income') }, '+')
   );
 }
@@ -958,6 +931,7 @@ function renderEntryForm(m) {
       !m.isNew && h('button', { class: 'btn danger', onclick: () => {
         if (!confirm('Eliminare questo movimento?')) return;
         data.entries = data.entries.filter(x => x.id !== m.id);
+        save();
         closeModal();
       }}, 'Elimina'),
       h('button', { class: 'btn ghost', onclick: closeModal }, 'Annulla'),
@@ -982,6 +956,7 @@ function saveEntry(m) {
   const i = data.entries.findIndex(x => x.id === rec.id);
   if (i >= 0) data.entries[i] = rec;
   else data.entries.push(rec);
+  save();
   closeModal();
 }
 
@@ -1060,6 +1035,7 @@ function saveCategory(m) {
   const i = data.categories.findIndex(x => x.id === m.id);
   if (i >= 0) data.categories[i] = rec;
   else data.categories.push(rec);
+  save();
   if (m.fromManager) openCategoryManager();
   else closeModal();
 }
@@ -1071,6 +1047,7 @@ function deleteCategory(c) {
     : `Eliminare la categoria "${c.name}"?`;
   if (!confirm(msg)) return;
   data.categories = data.categories.filter(x => x.id !== c.id);
+  save();
   render();
 }
 
@@ -1083,15 +1060,15 @@ function renderCategoryManager() {
       c.name,
       c.excluded ? h('span', { class: 'excluded-tag' }, '(esclusa)') : null
     ),
-    h('button', { class: 'del', onclick: () => deleteCategory(c) }, '✕')
+    h('button', { class: 'del', 'aria-label': `Elimina categoria ${c.name}`, onclick: () => deleteCategory(c) }, '✕')
   );
   return h('div', { class: 'modal' },
     h('h2', {}, 'Gestisci categorie'),
-    h('div', { class: 'section-label', style: 'color:var(--income)' }, 'Entrate'),
+    h('div', { class: 'section-label income' }, 'Entrate'),
     ...(income.length ? income.map(row) : [h('div', { class: 'empty', style: 'padding:8px 0' }, 'Nessuna categoria.')]),
     h('button', { class: 'btn', style: 'margin-top:6px',
       onclick: () => openCategoryModal(null, 'income', true) }, '+ Nuova entrata'),
-    h('div', { class: 'section-label', style: 'color:var(--expense)' }, 'Uscite'),
+    h('div', { class: 'section-label expense' }, 'Uscite'),
     ...(expense.length ? expense.map(row) : [h('div', { class: 'empty', style: 'padding:8px 0' }, 'Nessuna categoria.')]),
     h('button', { class: 'btn', style: 'margin-top:6px',
       onclick: () => openCategoryModal(null, 'expense', true) }, '+ Nuova uscita'),
@@ -1107,7 +1084,7 @@ function renderSettingsModal() {
     h('h2', {}, 'Impostazioni'),
     h('div', { class: 'settings-item' },
       h('div', {}, 'Gestisci categorie'),
-      h('button', { class: 'btn primary', style: 'flex:0 0 auto;padding:8px 14px',
+      h('button', { class: 'btn primary compact',
         onclick: openCategoryManager }, 'Apri')
     ),
     h('div', { class: 'settings-item' },
@@ -1115,7 +1092,7 @@ function renderSettingsModal() {
         h('div', {}, 'Backup (CSV)'),
         h('div', { class: 'hint' }, `${backupStatusLabel()} — scarica 2 file: categorie e movimenti`)
       ),
-      h('button', { class: 'btn primary', style: 'flex:0 0 auto;padding:8px 14px',
+      h('button', { class: 'btn primary compact',
         onclick: exportCsvBackup }, 'Scarica')
     ),
     h('div', { class: 'settings-item' },
@@ -1123,10 +1100,10 @@ function renderSettingsModal() {
         h('div', {}, 'Ripristina da CSV'),
         h('div', { class: 'hint' }, 'Seleziona entrambi i file (categorie + movimenti)')
       ),
-      h('label', { class: 'btn', style: 'flex:0 0 auto;padding:8px 14px;cursor:pointer' },
+      h('label', { class: 'btn compact' },
         'Carica',
         h('input', {
-          type: 'file', accept: '.csv,text/csv', multiple: true, style: 'display:none',
+          type: 'file', accept: '.csv,text/csv', multiple: true, class: 'input-hidden',
           onchange: (e) => { if (e.target.files.length) importCsvBackup(e.target.files); }
         })
       )
@@ -1136,7 +1113,7 @@ function renderSettingsModal() {
         h('div', {}, 'Storage persistente'),
         h('div', { class: 'hint', id: 'persist-status' }, 'Stato: controllo in corso…')
       ),
-      h('button', { class: 'btn', style: 'flex:0 0 auto;padding:8px 14px',
+      h('button', { class: 'btn compact',
         onclick: async () => {
           const ok = await requestPersistence();
           alert(ok ? 'Storage persistente attivo.'
@@ -1148,14 +1125,14 @@ function renderSettingsModal() {
       h('div', {},
         h('div', {}, 'Forza aggiornamento'),
         h('div', { class: 'hint' }, 'Cancella cache e service worker, poi ricarica')),
-      h('button', { class: 'btn', style: 'flex:0 0 auto;padding:8px 14px',
+      h('button', { class: 'btn compact',
         onclick: clearAppCache }, 'Aggiorna')
     ),
     h('div', { class: 'settings-item' },
       h('div', {},
         h('div', {}, 'Cancella tutti i dati'),
         h('div', { class: 'hint' }, 'Non reversibile')),
-      h('button', { class: 'btn danger', style: 'flex:0 0 auto;padding:8px 14px',
+      h('button', { class: 'btn danger compact',
         onclick: () => {
           if (!confirm("Cancellare tutti i movimenti e categorie? L'operazione non è reversibile.")) return;
           data = defaultData(); save(); closeModal();
@@ -1234,8 +1211,8 @@ document.addEventListener('touchend', (e) => {
   const dy = touch.clientY - swipeStartY;
   swipeStartX = null;
   if (state.modal || state.period === 'all') return;
-  if (Math.abs(dx) < 60) return;
-  if (Math.abs(dx) <= Math.abs(dy) * 1.5) return;
+  if (Math.abs(dx) < SWIPE.minDistance) return;
+  if (Math.abs(dx) <= Math.abs(dy) * SWIPE.horizontalRatio) return;
   navigateWithAnimation(dx > 0 ? -1 : 1);
 }, { passive: true });
 
@@ -1259,7 +1236,7 @@ if ('serviceWorker' in navigator) {
         });
       });
       reg.update().catch(() => {});
-      setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+      setInterval(() => reg.update().catch(() => {}), SW_UPDATE_INTERVAL_MS);
     }).catch(() => {});
   });
 }
