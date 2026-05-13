@@ -1,14 +1,14 @@
-const CACHE = 'spese-v36';
+const CACHE = 'spese-v37';
 const ASSETS = [
   './',
   'index.html',
   'styles.css?v=35',
   'app.js?v=36',
   'manifest.webmanifest',
-  'icon.svg',
-  'icon-192.png',
-  'icon-512.png',
-  'icon-512-maskable.png',
+  'icons/icon.svg',
+  'icons/icon-192.png',
+  'icons/icon-512.png',
+  'icons/icon-512-maskable.png',
 ];
 
 self.addEventListener('install', (e) => {
